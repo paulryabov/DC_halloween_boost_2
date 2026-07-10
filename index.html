@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Halloween Pull-to-Refresh</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    height: 100%;
+    background: #101018;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: -apple-system, sans-serif;
+    overscroll-behavior: none;
+  }
+
+  .phone {
+    position: relative;
+    width: 375px;
+    height: 812px;
+    border-radius: 44px;
+    overflow: hidden;
+    box-shadow: 0 0 0 12px #2a2a30, 0 0 0 14px #0c0c10, 0 30px 80px rgba(0,0,0,.7);
+    background: #1c1c1e;
+  }
+
+  /* --- backdrop hidden behind the content: same app color, nothing changes --- */
+  .halloween-bg {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 300px;
+    z-index: 0;
+    background: #262626;
+  }
+  /* ghostly bluish glow behind the 3D scene; the gradient fades to zero
+     well before the status bar so there is no hard edge at the top */
+  .ghost-glow {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 300px;
+    z-index: 1;
+    pointer-events: none;
+    opacity: 0;
+    will-change: opacity;
+    background:
+      radial-gradient(ellipse 240px 135px at 50% 168px,
+        rgba(140, 175, 255, 0.30) 0%,
+        rgba(120, 150, 255, 0.16) 40%,
+        rgba(100, 130, 255, 0.06) 62%,
+        rgba(100, 130, 255, 0) 78%);
+    /* fade out before the content edge (44px status bar + 150px settle pull)
+       so the glow never gets clipped by the shifted content */
+    -webkit-mask-image: linear-gradient(180deg, #000 0, #000 142px, transparent 190px);
+    mask-image: linear-gradient(180deg, #000 0, #000 142px, transparent 190px);
+  }
+  #scene {
+    position: absolute;
+    top: 30px; left: 0;
+    width: 375px; height: 250px;
+    z-index: 1;
+    display: block;
+  }
+
+  /* --- Scrollable app content (the movable part) --- */
+  .scroller {
+    position: absolute;
+    top: 44px; left: 0; right: 0; bottom: 0;
+    z-index: 2;
+    overflow-y: auto;
+    overscroll-behavior: none;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
+    will-change: transform;
+  }
+  .scroller::-webkit-scrollbar { display: none; }
+  .page {
+    width: 375px;
+    height: 2043px; /* full image minus the 44px status bar */
+    background: url("assets/screen.png") no-repeat 0 -44px / 375px 2087px;
+    user-select: none;
+    -webkit-user-drag: none;
+  }
+
+  /* --- Fixed status bar (time / signal / battery) --- */
+  .statusbar {
+    position: absolute;
+    top: 0; left: 0;
+    width: 375px; height: 44px;
+    z-index: 3;
+    background: url("assets/screen.png") no-repeat top center / 375px 2087px;
+    background-position: 0 0;
+    pointer-events: none;
+  }
+
+  .hint {
+    position: fixed;
+    bottom: 16px; left: 0; right: 0;
+    text-align: center;
+    color: #6a6a78;
+    font-size: 13px;
+  }
+</style>
+</head>
+<body>
+
+<div class="phone">
+  <div class="halloween-bg"></div>
+  <div class="ghost-glow"></div>
+  <canvas id="scene"></canvas>
+  <div class="scroller" id="scroller">
+    <div class="page"></div>
+  </div>
+  <div class="statusbar"></div>
+</div>
+<div class="hint">Потяните экран вниз (мышью или тачем), чтобы вызвать тыквы</div>
+
+<script src="lib/three.min.js"></script>
+<script>
+
+/* ============================================================
+   3D SCENE: three carved pumpkins glowing from inside
+   ============================================================ */
+const canvas = document.getElementById('scene');
+const W = 375, H = 250;
+const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(W, H);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(38, W / H, 0.1, 50);
+camera.position.set(0, 0.4, 7);
+camera.lookAt(0, -0.2, 0);
+
+scene.add(new THREE.AmbientLight(0x77778a, 1.0));
+const keyLight = new THREE.DirectionalLight(0xfff2dd, 1.2);
+keyLight.position.set(3, 6, 4);
+scene.add(keyLight);
+
+/* ---------- texture painting ---------- */
+function makeBodyTexture() {
+  const c = document.createElement('canvas');
+  c.width = 1024; c.height = 512;
+  const g = c.getContext('2d');
+  g.fillStyle = '#d96a12';
+  g.fillRect(0, 0, 1024, 512);
+  // vertical rib shading
+  for (let i = 0; i < 10; i++) {
+    const x = i * 102.4;
+    const grd = g.createLinearGradient(x, 0, x + 102.4, 0);
+    grd.addColorStop(0, 'rgba(120,45,5,0.55)');
+    grd.addColorStop(0.5, 'rgba(255,150,50,0.25)');
+    grd.addColorStop(1, 'rgba(120,45,5,0.55)');
+    g.fillStyle = grd;
+    g.fillRect(x, 0, 102.4, 512);
+  }
+  // mottled surface noise
+  for (let i = 0; i < 900; i++) {
+    g.fillStyle = `rgba(${150 + Math.random() * 90 | 0},${60 + Math.random() * 50 | 0},10,${Math.random() * 0.08})`;
+    g.beginPath();
+    g.arc(Math.random() * 1024, Math.random() * 512, 1 + Math.random() * 6, 0, 7);
+    g.fill();
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return { texture: t, ctx: g, canvas: c };
+}
+
+/* Draw a scary face. Returns two textures: dark cutout for the color
+   map and bright glow for the emissive map (same shapes). */
+function drawFace(g, variant, color) {
+  g.save();
+  g.translate(512, 300); // face center: u=0.5, slightly below equator
+  g.fillStyle = color;
+  g.strokeStyle = color;
+
+  const tri = (x, y, w, h, flip = 1, skew = 0) => {
+    g.beginPath();
+    g.moveTo(x - w / 2 + skew, y + (h / 2) * flip);
+    g.lineTo(x + w / 2 + skew, y + (h / 2) * flip);
+    g.lineTo(x, y - (h / 2) * flip);
+    g.closePath();
+    g.fill();
+  };
+
+  if (variant === 0) {
+    /* classic evil grin */
+    tri(-95, -60, 95, 80);
+    tri(95, -60, 95, 80);
+    tri(0, 15, 55, 50);
+    // jagged smile
+    g.beginPath();
+    g.moveTo(-160, 70);
+    g.quadraticCurveTo(0, 190, 160, 70);
+    g.quadraticCurveTo(120, 105, 90, 95);
+    g.lineTo(75, 130); g.lineTo(45, 100);
+    g.lineTo(20, 140); g.lineTo(-10, 102);
+    g.lineTo(-40, 138); g.lineTo(-70, 98);
+    g.lineTo(-95, 126); g.lineTo(-115, 92);
+    g.quadraticCurveTo(-140, 92, -160, 70);
+    g.closePath();
+    g.fill();
+    // upper teeth
+    g.beginPath();
+    g.moveTo(-60, 78); g.lineTo(-40, 100); g.lineTo(-20, 78); g.closePath(); g.fill();
+  } else if (variant === 1) {
+    /* angry slanted */
+    g.save(); g.rotate(-0.35); tri(-95, -45, 110, 70); g.restore();
+    g.save(); g.rotate(0.35); tri(95, -45, 110, 70); g.restore();
+    tri(0, 20, 45, 45);
+    // zigzag mouth
+    g.beginPath();
+    g.moveTo(-150, 95);
+    for (let i = 0; i <= 8; i++) {
+      g.lineTo(-150 + i * 37.5, 95 + (i % 2 ? 38 : 0));
+    }
+    g.lineTo(150, 122); g.lineTo(-150, 122);
+    g.closePath();
+    g.fill();
+  } else {
+    /* screaming */
+    g.beginPath(); g.arc(-90, -55, 48, 0, 7); g.fill();
+    g.beginPath(); g.arc(90, -55, 48, 0, 7); g.fill();
+    tri(0, 15, 40, 40, -1);
+    g.beginPath();
+    g.ellipse(0, 105, 55, 70, 0, 0, 7);
+    g.fill();
+    // brows
+    g.lineWidth = 16; g.lineCap = 'round';
+    g.beginPath(); g.moveTo(-140, -120); g.lineTo(-45, -105); g.stroke();
+    g.beginPath(); g.moveTo(140, -120); g.lineTo(45, -105); g.stroke();
+  }
+  g.restore();
+}
+
+function makeFaceTextures(variant) {
+  const body = makeBodyTexture();
+  drawFace(body.ctx, variant, '#1a0700');       // carved dark holes on color map
+  body.texture.needsUpdate = true;
+
+  const e = document.createElement('canvas');
+  e.width = 1024; e.height = 512;
+  const eg = e.getContext('2d');
+  eg.fillStyle = '#000';
+  eg.fillRect(0, 0, 1024, 512);
+  eg.shadowColor = '#ff9a1f';
+  eg.shadowBlur = 30;
+  drawFace(eg, variant, '#ffc24d');             // glowing shapes on emissive map
+  const et = new THREE.CanvasTexture(e);
+  et.colorSpace = THREE.SRGBColorSpace;
+  return { map: body.texture, emissiveMap: et };
+}
+
+/* ---------- pumpkin mesh ---------- */
+function makePumpkin(variant, size) {
+  const geo = new THREE.SphereGeometry(1, 96, 48);
+  const pos = geo.attributes.position;
+  const v = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i++) {
+    v.fromBufferAttribute(pos, i);
+    const ang = Math.atan2(v.z, v.x);
+    const ridge = 1 + 0.055 * Math.cos(ang * 10);           // 10 ribs
+    v.x *= ridge; v.z *= ridge;
+    v.y *= 0.82 - 0.05 * Math.cos(ang * 10);                // squat shape
+    pos.setXYZ(i, v.x, v.y, v.z);
+  }
+  geo.computeVertexNormals();
+
+  const tex = makeFaceTextures(variant);
+  const mat = new THREE.MeshStandardMaterial({
+    map: tex.map,
+    emissiveMap: tex.emissiveMap,
+    emissive: new THREE.Color(0xff8c1a),
+    emissiveIntensity: 1.6,
+    roughness: 0.55,
+    metalness: 0.05,
+  });
+  const bodyMesh = new THREE.Mesh(geo, mat);
+  bodyMesh.rotation.y = -Math.PI / 2; // texture center (u=0.5) faces camera
+
+  // stem
+  const stemGeo = new THREE.CylinderGeometry(0.08, 0.16, 0.42, 8);
+  const stem = new THREE.Mesh(stemGeo, new THREE.MeshStandardMaterial({
+    color: 0x4c6b1f, roughness: 0.9,
+  }));
+  stem.position.y = 0.92;
+  stem.rotation.z = 0.25;
+
+  // inner candle light leaking through the cuts
+  const glow = new THREE.PointLight(0xff9a2e, 2.2, 4.5, 2);
+  glow.position.set(0, -0.1, 0.6);
+
+  const group = new THREE.Group();
+  group.add(bodyMesh, stem, glow);
+  group.scale.setScalar(size);
+  return { group, mat, glow, size };
+}
+
+/* soft blob shadow under a pumpkin */
+function makeShadow() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const g = c.getContext('2d');
+  const grd = g.createRadialGradient(128, 128, 10, 128, 128, 120);
+  grd.addColorStop(0, 'rgba(0,0,0,0.72)');
+  grd.addColorStop(0.6, 'rgba(0,0,0,0.35)');
+  grd.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = grd;
+  g.fillRect(0, 0, 256, 256);
+  const tex = new THREE.CanvasTexture(c);
+  const mesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(1, 1),
+    new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0, depthWrite: false })
+  );
+  mesh.rotation.x = -Math.PI / 2;
+  return mesh;
+}
+
+const GROUND = 0.08;                  // landing surface level (~30px higher)
+const FAR_Z = -8;                     // pumpkins fly in from this depth
+const pumpkins = [
+  { ...makePumpkin(1, 0.375), x: -0.95, delay: 0.12, hopDelay: 0.25 },
+  { ...makePumpkin(0, 0.48),  x: 0,     delay: 0.0,  hopDelay: 0    },
+  { ...makePumpkin(2, 0.375), x: 0.95,  delay: 0.24, hopDelay: 0.5  },
+];
+for (const p of pumpkins) {
+  p.bottom = 0.87 * p.size;           // distance from center to the base
+  p.group.position.set(p.x, GROUND + p.bottom, FAR_Z);
+  p.group.scale.setScalar(0.0001);
+  p.shadow = makeShadow();
+  p.shadow.position.set(p.x, GROUND + 0.001, 0);
+  scene.add(p.group, p.shadow);
+}
+
+/* ---------- bats ---------- */
+function makeBat() {
+  const wingShape = new THREE.Shape();
+  wingShape.moveTo(0, 0);
+  wingShape.quadraticCurveTo(0.45, 0.42, 1.0, 0.28);
+  wingShape.quadraticCurveTo(0.82, 0.05, 0.78, -0.02);
+  wingShape.quadraticCurveTo(0.6, 0.1, 0.52, -0.06);
+  wingShape.quadraticCurveTo(0.32, 0.06, 0.2, -0.1);
+  wingShape.quadraticCurveTo(0.08, -0.04, 0, 0);
+  const wingGeo = new THREE.ShapeGeometry(wingShape, 12);
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0x17171d, roughness: 0.8, side: THREE.DoubleSide,
+  });
+
+  const right = new THREE.Mesh(wingGeo, mat);
+  right.position.x = 0.06;
+  const left = new THREE.Mesh(wingGeo, mat);
+  left.scale.x = -1;
+  left.position.x = -0.06;
+
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.12, 12, 8), mat);
+  body.scale.set(0.75, 1, 0.75);
+  const earGeo = new THREE.ConeGeometry(0.04, 0.1, 6);
+  const earL = new THREE.Mesh(earGeo, mat);
+  earL.position.set(-0.05, 0.13, 0);
+  const earR = new THREE.Mesh(earGeo, mat);
+  earR.position.set(0.05, 0.13, 0);
+
+  const group = new THREE.Group();
+  group.add(right, left, body, earL, earR);
+  group.visible = false;
+  return { group, left, right };
+}
+
+const HOP_START = 0.65;               // same as ENTRY in animatePumpkins
+const bats = [];
+for (let i = 0; i < 7; i++) {
+  const b = makeBat();
+  b.delay = i * 0.10 + Math.random() * 0.04;
+  b.duration = 0.9 + Math.random() * 0.2;   // flock fits within the hop window
+  b.flightY = 1.25 + Math.random() * 0.75;
+  b.z = -1.5 - Math.random() * 1.5;
+  b.scale = 0.26 + Math.random() * 0.1;
+  b.phase = Math.random() * 6.28;
+  b.group.scale.setScalar(b.scale);
+  scene.add(b.group);
+  bats.push(b);
+}
+
+function animateBats(t) {
+  const flying = state === 'refreshing' && (t - refreshStart) >= HOP_START;
+  for (const b of bats) {
+    if (!flying) { b.group.visible = false; continue; }
+    const bt = t - refreshStart - HOP_START - b.delay;
+    const k = bt / b.duration;
+    if (k < 0 || k > 1) { b.group.visible = false; continue; }
+    b.group.visible = true;
+    const span = 4.5 + Math.abs(b.z) * 0.7;     // wider path for deeper bats
+    b.group.position.set(
+      -span + 2 * span * k,
+      b.flightY + 0.18 * Math.sin(bt * 9 + b.phase),
+      b.z
+    );
+    const flap = 0.6 * Math.sin(bt * 22 + b.phase) + 0.1;
+    b.right.rotation.z = flap;
+    b.left.rotation.z = -flap;
+    b.group.rotation.z = -0.1 + 0.08 * Math.sin(bt * 9 + b.phase);
+  }
+}
+
+/* ---------- easing ---------- */
+const easeInBack = t => { const c = 1.9; return (c + 1) * t * t * t - c * t * t; };
+const clamp01 = t => Math.min(1, Math.max(0, t));
+
+/* ============================================================
+   PULL-TO-REFRESH STATE MACHINE
+   ============================================================ */
+const scroller = document.getElementById('scroller');
+const MAX_PULL = 190;
+const TRIGGER = 90;
+const SHOW_TIME = 2.4;      // seconds pumpkins stay out (fits the 2-3s brief)
+const RETURN_TIME = 0.55;
+
+let state = 'idle';         // idle | pulling | refreshing | returning
+let pull = 0;               // current translateY of content
+let startY = 0;
+let refreshStart = 0;
+let returnStart = 0;
+let returnFromPull = 0;
+
+function setPull(px) {
+  pull = px;
+  scroller.style.transform = px > 0 ? `translateY(${px}px)` : '';
+}
+
+scroller.addEventListener('pointerdown', e => {
+  if (state !== 'idle') return;
+  startY = e.clientY;
+  scroller.setPointerCapture(e.pointerId);
+});
+scroller.addEventListener('pointermove', e => {
+  if (state === 'refreshing' || state === 'returning') return;
+  const dy = e.clientY - startY;
+  if (scroller.scrollTop <= 0 && dy > 0 && e.buttons) {
+    state = 'pulling';
+    e.preventDefault();
+    // rubber-band resistance
+    setPull(Math.min(MAX_PULL, MAX_PULL * (1 - Math.exp(-dy / 160))));
+  } else if (state === 'pulling') {
+    state = 'idle';
+    setPull(0);
+  }
+});
+function endPull() {
+  if (state !== 'pulling') return;
+  if (pull >= TRIGGER) {
+    state = 'refreshing';
+    refreshStart = clock.getElapsedTime();
+    // settle content at a fixed open position
+    scroller.style.transition = 'transform .25s ease-out';
+    setPull(150);
+    setTimeout(() => scroller.style.transition = '', 260);
+  } else {
+    startReturn();
+  }
+}
+scroller.addEventListener('pointerup', endPull);
+scroller.addEventListener('pointercancel', endPull);
+// block native touch scroll while pulling
+scroller.addEventListener('touchmove', e => {
+  if (state === 'pulling' || state === 'refreshing') e.preventDefault();
+}, { passive: false });
+
+function startReturn() {
+  state = 'returning';
+  returnStart = clock.getElapsedTime();
+  returnFromPull = pull;
+}
+
+/* ============================================================
+   ANIMATION LOOP
+   ============================================================ */
+const clock = new THREE.Clock();
+
+const glowEl = document.querySelector('.ghost-glow');
+let glowOpacity = 0;
+function animateGlow() {
+  const target =
+    state === 'refreshing' ? 1 :
+    state === 'pulling' ? clamp01(pull / MAX_PULL) * 0.7 : 0;
+  glowOpacity += (target - glowOpacity) * 0.07;
+  if (glowOpacity < 0.005 && target === 0) glowOpacity = 0;
+  glowEl.style.opacity = glowOpacity.toFixed(3);
+}
+
+/* place pumpkin + its shadow for a given height above ground */
+function setPose(p, scale, height, z, squashY = 1) {
+  const g = p.group;
+  g.position.set(p.x, GROUND + p.bottom * scale / p.size * squashY + height, z);
+  g.scale.set(
+    scale / Math.sqrt(squashY),
+    scale * squashY,
+    scale / Math.sqrt(squashY)
+  );
+  // shadow follows on the ground: smaller and lighter when the pumpkin is high or far
+  const heightFade = clamp01(1 - height / 1.4);
+  const depthFade = clamp01(1 - Math.abs(z) / Math.abs(FAR_Z));
+  const s = Math.max(0.001, 2.6 * scale * (0.6 + 0.4 * heightFade));
+  p.shadow.scale.set(s, s, 1);
+  p.shadow.position.set(p.x, GROUND + 0.001, z);
+  p.shadow.material.opacity = 0.85 * heightFade * depthFade * clamp01(scale / p.size);
+}
+
+function animatePumpkins(t) {
+  for (const p of pumpkins) {
+    const g = p.group;
+    const ENTRY = 0.65;
+
+    if (state === 'pulling') {
+      // grow slightly "in the distance" while the user pulls
+      const k = clamp01(pull / MAX_PULL);
+      setPose(p, p.size * 0.35 * k, 0.15, FAR_Z * 0.7);
+      p.mat.emissiveIntensity = 1.2 + k;
+      continue;
+    }
+
+    if (state === 'refreshing') {
+      const local = t - refreshStart - p.delay;
+      if (local < 0) {
+        setPose(p, 0.0001, 0, FAR_Z);
+      } else if (local < ENTRY) {
+        // fly in from the depth, from zero size, along an arc, and land
+        const k = 1 - Math.pow(1 - local / ENTRY, 3); // easeOutCubic
+        const scale = p.size * k;
+        const height = 1.0 * (1 - k) + 0.35 * Math.sin(Math.PI * k);
+        const z = FAR_Z * (1 - k);
+        // squash right at touchdown
+        const squash = k > 0.85 ? 1 - 0.22 * Math.sin(Math.PI * (k - 0.85) / 0.15) : 1;
+        setPose(p, scale, height, z, squash);
+        g.rotation.z = 0.3 * Math.sin(local * 10) * (1 - k);
+      } else {
+        // loader hops on the surface with squash-and-stretch + candle flicker
+        const bt = local - ENTRY;
+        // each hop wave starts smoothly from the ground after its own delay
+        const ht = bt - p.hopDelay;
+        const hopWave = ht > 0 ? Math.sin(ht * 4.6) : 0;
+        const hop = Math.max(0, hopWave) * 0.32;
+        // squash when on the ground, stretch mid-air
+        const squash = hop > 0.01
+          ? 1 + 0.18 * Math.sin(Math.PI * Math.min(1, hop / 0.32))
+          : 1 - 0.16 * Math.abs(Math.min(0, hopWave));
+        setPose(p, p.size, hop, 0, squash);
+        g.rotation.z = 0.08 * Math.sin(bt * 2.4 + p.x * 3) * clamp01(bt / 0.4);
+        const flicker = 0.25 * Math.sin(bt * 21) * Math.sin(bt * 13.7) + Math.random() * 0.08;
+        p.mat.emissiveIntensity = 1.9 + flicker;
+        p.glow.intensity = 2.2 + flicker * 2;
+      }
+      continue;
+    }
+
+    if (state === 'returning') {
+      // zoom away back into the depth, shrinking to zero
+      const k = easeInBack(clamp01((t - returnStart) / RETURN_TIME));
+      const kk = clamp01(k);
+      setPose(p, Math.max(0.0001, p.size * (1 - kk)), 0.2 * kk, FAR_Z * kk);
+      continue;
+    }
+
+    // idle: hidden
+    setPose(p, 0.0001, 0, FAR_Z);
+  }
+}
+
+function tick() {
+  requestAnimationFrame(tick);
+  const t = clock.getElapsedTime();
+
+  if (state === 'refreshing' && t - refreshStart >= SHOW_TIME) {
+    startReturn();
+  }
+  if (state === 'returning') {
+    const k = clamp01((t - returnStart) / RETURN_TIME);
+    const ease = 1 - Math.pow(1 - k, 3); // easeOutCubic
+    setPull(returnFromPull * (1 - ease));
+    if (k >= 1) { state = 'idle'; setPull(0); }
+  }
+
+  animatePumpkins(t);
+  animateBats(t);
+  animateGlow();
+  renderer.render(scene, camera);
+}
+tick();
+</script>
+</body>
+</html>
