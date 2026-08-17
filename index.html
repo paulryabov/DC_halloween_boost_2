@@ -27,7 +27,38 @@
     background: #1c1c1e;
   }
 
-  /* --- backdrop hidden behind the content: same app color, nothing changes --- */
+  .app-loader {
+    position: absolute;
+    inset: 0;
+    z-index: 30;
+    display: grid;
+    place-items: center;
+    background: #eceef0;
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+    transition: opacity 220ms ease, visibility 220ms ease;
+  }
+
+  .phone:not(.is-loading) .app-loader {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+  }
+
+  .app-loader__spinner {
+    width: 32px;
+    height: 32px;
+    border: 3px solid rgba(38, 38, 38, .12);
+    border-top-color: #009e36;
+    border-radius: 50%;
+    animation: loader-spin 760ms linear infinite;
+  }
+
+  @keyframes loader-spin {
+    to { transform: rotate(360deg); }
+  }
+
   .halloween-bg {
     position: absolute;
     top: 0; left: 0; right: 0;
@@ -35,40 +66,81 @@
     z-index: 0;
     background: #262626;
   }
-  /* ghostly bluish glow behind the 3D scene; the gradient fades to zero
-     well before the status bar so there is no hard edge at the top */
-  .ghost-glow {
+
+  .halloween-sky {
     position: absolute;
-    top: 0; left: 0; right: 0;
-    height: 300px;
+    top: 44px; left: 0; right: 0;
+    height: 190px;
     z-index: 1;
     pointer-events: none;
     opacity: 0;
     will-change: opacity;
     background:
-      radial-gradient(ellipse 240px 135px at 50% 168px,
-        rgba(140, 175, 255, 0.30) 0%,
-        rgba(120, 150, 255, 0.16) 40%,
-        rgba(100, 130, 255, 0.06) 62%,
-        rgba(100, 130, 255, 0) 78%);
-    /* fade out before the content edge (44px status bar + 150px settle pull)
-       so the glow never gets clipped by the shifted content */
-    -webkit-mask-image: linear-gradient(180deg, #000 0, #000 142px, transparent 190px);
-    mask-image: linear-gradient(180deg, #000 0, #000 142px, transparent 190px);
+      radial-gradient(ellipse 180px 120px at 73% 72%, rgba(255, 177, 70, .50), transparent 72%),
+      linear-gradient(180deg,
+        rgba(55, 24, 16, .10) 0%,
+        rgba(112, 42, 15, .50) 32%,
+        rgba(202, 70, 10, .82) 70%,
+        rgba(245, 116, 22, .95) 100%);
   }
+
+  .moon {
+    position: absolute;
+    top: 48px;
+    right: -32px;
+    width: 116px;
+    height: 116px;
+    z-index: 1;
+    display: block;
+    filter: drop-shadow(0 0 18px rgba(255, 182, 70, .54));
+  }
+
   #scene {
     position: absolute;
     top: 30px; left: 0;
     width: 375px; height: 250px;
-    z-index: 1;
+    z-index: 3;
     display: block;
   }
 
-  /* --- Scrollable app content (the movable part) --- */
+  .background-motion {
+    position: absolute;
+    bottom: calc(100% - 48px);
+    left: 0;
+    width: 375px;
+    z-index: 2;
+    pointer-events: none;
+    opacity: 0;
+    will-change: transform, opacity;
+  }
+
+  .graveyard-background {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+
+  .graveyard-motion {
+    position: absolute;
+    bottom: calc(100% - 48px);
+    left: 0;
+    width: 375px;
+    z-index: 5;
+    pointer-events: none;
+    opacity: 0;
+    will-change: transform, opacity;
+  }
+
+  .graveyard-foreground {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+
   .scroller {
     position: absolute;
     top: 44px; left: 0; right: 0; bottom: 0;
-    z-index: 2;
+    z-index: 4;
     overflow-y: auto;
     overscroll-behavior: none;
     -webkit-overflow-scrolling: touch;
@@ -84,12 +156,11 @@
     -webkit-user-drag: none;
   }
 
-  /* --- Fixed status bar (time / signal / battery) --- */
   .statusbar {
     position: absolute;
     top: 0; left: 0;
     width: 375px; height: 44px;
-    z-index: 3;
+    z-index: 6;
     background: url("assets/screen.png") no-repeat top center / 375px 2087px;
     background-position: 0 0;
     pointer-events: none;
@@ -102,20 +173,55 @@
     color: #6a6a78;
     font-size: 13px;
   }
+
+  @media (max-width: 600px) {
+    html {
+      display: block;
+      height: auto;
+      min-height: 100%;
+    }
+
+    body {
+      height: auto;
+      min-height: 100dvh;
+      align-items: flex-start;
+      padding-top: 14px;
+      overflow-x: hidden;
+    }
+
+    .phone {
+      flex: 0 0 auto;
+    }
+
+    .hint {
+      display: none;
+    }
+  }
 </style>
 </head>
 <body>
 
-<div class="phone">
+<div class="phone is-loading">
+  <div class="app-loader" role="status" aria-live="polite" aria-label="Загрузка">
+    <span class="app-loader__spinner" aria-hidden="true"></span>
+  </div>
   <div class="halloween-bg"></div>
-  <div class="ghost-glow"></div>
+  <div class="halloween-sky">
+    <img class="moon" src="assets/moon.svg" alt="">
+  </div>
+  <div class="background-motion">
+    <img class="graveyard-background" src="assets/graveyard-background.svg" alt="">
+  </div>
   <canvas id="scene"></canvas>
   <div class="scroller" id="scroller">
     <div class="page"></div>
   </div>
+  <div class="graveyard-motion">
+    <img class="graveyard-foreground" src="assets/graveyard-foreground.svg" alt="">
+  </div>
   <div class="statusbar"></div>
 </div>
-<div class="hint">Потяните экран вниз (мышью или тачем), чтобы вызвать тыквы</div>
+<div class="hint">Потяните экран вниз (мышью или свайпом), чтобы вызвать лоадер страницы</div>
 
 <script src="lib/three.min.js"></script>
 <script>
@@ -134,8 +240,8 @@ const camera = new THREE.PerspectiveCamera(38, W / H, 0.1, 50);
 camera.position.set(0, 0.4, 7);
 camera.lookAt(0, -0.2, 0);
 
-scene.add(new THREE.AmbientLight(0x77778a, 1.0));
-const keyLight = new THREE.DirectionalLight(0xfff2dd, 1.2);
+scene.add(new THREE.AmbientLight(0x744536, 1.05));
+const keyLight = new THREE.DirectionalLight(0xffb15c, 1.45);
 keyLight.position.set(3, 6, 4);
 scene.add(keyLight);
 
@@ -412,6 +518,8 @@ const clamp01 = t => Math.min(1, Math.max(0, t));
    PULL-TO-REFRESH STATE MACHINE
    ============================================================ */
 const scroller = document.getElementById('scroller');
+const foregroundEl = document.querySelector('.graveyard-motion');
+const backgroundEl = document.querySelector('.background-motion');
 const MAX_PULL = 190;
 const TRIGGER = 90;
 const SHOW_TIME = 2.4;      // seconds pumpkins stay out (fits the 2-3s brief)
@@ -426,7 +534,12 @@ let returnFromPull = 0;
 
 function setPull(px) {
   pull = px;
-  scroller.style.transform = px > 0 ? `translateY(${px}px)` : '';
+  const transform = px > 0 ? `translateY(${px}px)` : '';
+  scroller.style.transform = transform;
+  foregroundEl.style.transform = transform;
+  backgroundEl.style.transform = transform;
+  foregroundEl.style.opacity = Math.min(1, px / 64).toFixed(3);
+  backgroundEl.style.opacity = Math.min(1, px / 64).toFixed(3);
 }
 
 scroller.addEventListener('pointerdown', e => {
@@ -454,8 +567,14 @@ function endPull() {
     refreshStart = clock.getElapsedTime();
     // settle content at a fixed open position
     scroller.style.transition = 'transform .25s ease-out';
+    foregroundEl.style.transition = 'transform .25s ease-out, opacity .25s ease-out';
+    backgroundEl.style.transition = 'transform .25s ease-out, opacity .25s ease-out';
     setPull(150);
-    setTimeout(() => scroller.style.transition = '', 260);
+    setTimeout(() => {
+      scroller.style.transition = '';
+      foregroundEl.style.transition = '';
+      backgroundEl.style.transition = '';
+    }, 260);
   } else {
     startReturn();
   }
@@ -478,15 +597,15 @@ function startReturn() {
    ============================================================ */
 const clock = new THREE.Clock();
 
-const glowEl = document.querySelector('.ghost-glow');
-let glowOpacity = 0;
+const skyEl = document.querySelector('.halloween-sky');
+let skyOpacity = 0;
 function animateGlow() {
   const target =
     state === 'refreshing' ? 1 :
-    state === 'pulling' ? clamp01(pull / MAX_PULL) * 0.7 : 0;
-  glowOpacity += (target - glowOpacity) * 0.07;
-  if (glowOpacity < 0.005 && target === 0) glowOpacity = 0;
-  glowEl.style.opacity = glowOpacity.toFixed(3);
+    state === 'pulling' ? clamp01(pull / TRIGGER) : 0;
+  skyOpacity += (target - skyOpacity) * 0.09;
+  if (skyOpacity < 0.005 && target === 0) skyOpacity = 0;
+  skyEl.style.opacity = skyOpacity.toFixed(3);
 }
 
 /* place pumpkin + its shadow for a given height above ground */
@@ -587,6 +706,16 @@ function tick() {
   renderer.render(scene, camera);
 }
 tick();
+
+const phoneEl = document.querySelector('.phone');
+function finishPageLoading() {
+  requestAnimationFrame(() => phoneEl.classList.remove('is-loading'));
+}
+if (document.readyState === 'complete') {
+  finishPageLoading();
+} else {
+  window.addEventListener('load', finishPageLoading, { once: true });
+}
 </script>
 </body>
 </html>
