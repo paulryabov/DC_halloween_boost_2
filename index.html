@@ -69,7 +69,7 @@
 
   .halloween-sky {
     position: absolute;
-    top: 96px; left: 0; right: 0;
+    top: 56px; left: 0; right: 0;
     height: 190px;
     z-index: 1;
     pointer-events: none;
@@ -97,7 +97,7 @@
 
   .halloween-art {
     position: absolute;
-    top: 96px; left: 0;
+    top: 56px; left: 0;
     width: 375px; height: 220px;
     z-index: 3;
     pointer-events: none;
@@ -315,9 +315,9 @@ function resetArt() {
 const scroller = document.getElementById('scroller');
 const foregroundEl = document.querySelector('.graveyard-motion');
 const backgroundEl = document.querySelector('.background-motion');
-const MAX_PULL = 230;
+const MAX_PULL = 190;
 const TRIGGER = 90;
-const OPEN_PULL = 220;      // illustration plus the 20px gradient tail
+const OPEN_PULL = 180;      // illustration shifted up 40px, so the reveal is 40px shorter
 const RETURN_TIME = 0.55;
 const clamp01 = t => Math.min(1, Math.max(0, t));
 
