@@ -64,41 +64,12 @@
     top: 0; left: 0; right: 0;
     height: 300px;
     z-index: 0;
-    background: #262626;
-  }
-
-  .halloween-sky {
-    position: absolute;
-    top: 56px; left: 0; right: 0;
-    height: 190px;
-    z-index: 1;
-    pointer-events: none;
-    opacity: 0;
-    will-change: opacity;
-    background:
-      radial-gradient(ellipse 180px 120px at 73% 72%, rgba(255, 177, 70, .50), transparent 72%),
-      linear-gradient(180deg,
-        rgba(55, 24, 16, .10) 0%,
-        rgba(112, 42, 15, .50) 32%,
-        rgba(202, 70, 10, .82) 70%,
-        rgba(245, 116, 22, .95) 100%);
-  }
-
-  .moon {
-    position: absolute;
-    top: 48px;
-    right: -32px;
-    width: 116px;
-    height: 116px;
-    z-index: 1;
-    display: block;
-    filter: drop-shadow(0 0 18px rgba(255, 182, 70, .54));
   }
 
   .halloween-art {
     position: absolute;
-    top: 56px; left: 0;
-    width: 375px; height: 220px;
+    top: 96px; left: 0;
+    width: 375px; height: 200px;
     z-index: 3;
     pointer-events: none;
     opacity: 0;
@@ -108,29 +79,6 @@
     display: block;
     width: 375px !important;
     height: 200px !important;
-  }
-
-  /* Continues the illustration's green-to-purple wash 20px below the
-     file, down to the top edge of the pulled content. */
-  .halloween-art::after {
-    content: "";
-    position: absolute;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    height: 148px;
-    pointer-events: none;
-    background:
-      linear-gradient(180deg, transparent 0%, rgba(38, 38, 38, 0) 42%, rgba(38, 38, 38, .55) 78%, #262626 100%),
-      linear-gradient(90deg, rgb(52, 82, 70) 0%, rgb(47, 63, 80) 46%, rgb(120, 78, 208) 100%);
-    -webkit-mask-image:
-      linear-gradient(180deg, transparent 0%, #000 38%),
-      linear-gradient(90deg, #000 0%, #000 34%, transparent 62%);
-    mask-image:
-      linear-gradient(180deg, transparent 0%, #000 38%),
-      linear-gradient(90deg, #000 0%, #000 34%, transparent 62%);
-    -webkit-mask-composite: source-in;
-    mask-composite: intersect;
   }
 
   .background-motion {
@@ -152,7 +100,7 @@
 
   .graveyard-motion {
     position: absolute;
-    bottom: calc(100% - 91px);
+    bottom: calc(100% - 96px);
     left: 0;
     width: 375px;
     z-index: 6;
@@ -163,18 +111,8 @@
 
   .graveyard-foreground {
     display: block;
-    width: 100%;
-    height: auto;
-  }
-
-  .graveyard-motion::after {
-    content: "";
-    position: absolute;
-    left: 0;
-    right: 0;
-    top: 100%;
-    height: 5px;
-    background: #262626;
+    width: 375px;
+    height: 200px;
   }
 
   .scroller {
@@ -255,18 +193,13 @@
     <span class="app-loader__spinner" aria-hidden="true"></span>
   </div>
   <div class="halloween-bg"></div>
-  <div class="halloween-sky">
-    <img class="moon" src="assets/moon.svg" alt="">
-  </div>
-  <div class="background-motion">
-    <img class="graveyard-background" src="assets/graveyard-background.svg" alt="">
-  </div>
+  <div class="background-motion"></div>
   <div class="halloween-art" id="halloween-art" aria-hidden="true"></div>
   <div class="scroller" id="scroller">
     <div class="page"></div>
   </div>
   <div class="graveyard-motion">
-    <img class="graveyard-foreground" src="assets/front-1.svg" alt="">
+    <img class="graveyard-foreground" src="image/top background (1).svg" alt="">
   </div>
   <div class="app-header"></div>
   <div class="statusbar"></div>
@@ -277,7 +210,7 @@
 <script>
 
 /* ============================================================
-   HEADER ILLUSTRATION: Lottie from image/halloween fast.json
+   HEADER ILLUSTRATION: Lottie, with the foreground SVG on top.
    Hidden until the pull reveals it; playback starts on refresh.
    ============================================================ */
 const artEl = document.getElementById('halloween-art');
@@ -286,7 +219,7 @@ const anim = lottie.loadAnimation({
   renderer: 'svg',
   loop: false,
   autoplay: false,
-  path: 'image/halloween%20fast.json',
+  path: 'image/new%20halloween_%20done.json',
 });
 
 let animReady = false;
@@ -315,9 +248,9 @@ function resetArt() {
 const scroller = document.getElementById('scroller');
 const foregroundEl = document.querySelector('.graveyard-motion');
 const backgroundEl = document.querySelector('.background-motion');
-const MAX_PULL = 190;
+const MAX_PULL = 210;
 const TRIGGER = 90;
-const OPEN_PULL = 180;      // illustration shifted up 40px, so the reveal is 40px shorter
+const OPEN_PULL = 200;
 const RETURN_TIME = 0.55;
 const clamp01 = t => Math.min(1, Math.max(0, t));
 
@@ -398,17 +331,6 @@ const clock = {
   getElapsedTime() { return (performance.now() - this.t0) / 1000; },
 };
 
-const skyEl = document.querySelector('.halloween-sky');
-let skyOpacity = 0;
-function animateGlow() {
-  const target =
-    state === 'refreshing' ? 1 :
-    state === 'pulling' ? clamp01(pull / TRIGGER) : 0;
-  skyOpacity += (target - skyOpacity) * 0.09;
-  if (skyOpacity < 0.005 && target === 0) skyOpacity = 0;
-  skyEl.style.opacity = skyOpacity.toFixed(3);
-}
-
 function tick() {
   requestAnimationFrame(tick);
   const t = clock.getElapsedTime();
@@ -427,7 +349,6 @@ function tick() {
     }
   }
 
-  animateGlow();
 }
 tick();
 
